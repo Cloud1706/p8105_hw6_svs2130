@@ -1,0 +1,57 @@
+---
+title: "Homework 6"
+author: "Harsha Senapathi"
+date: "11/21/2019"
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(expss)
+library(arsenal)
+```
+
+```{r}
+child_data = read_csv("./data/birthweight.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(babysex = as.factor(babysex))%>% 
+  mutate(frace = as.factor(frace))%>% 
+  mutate(mrace = as.factor(mrace))%>% 
+  mutate(malform = as.factor(malform)) 
+
+tableby(mrace ~ bwt + bhead, data = child_data) %>% summary() %>% knitr::kable()
+# no missing data
+sapply(child_data, function(x) sum(is.na(x)))
+
+
+fit = lm(bwt ~ delwt + gaweeks + momage + ppwt + frace + mrace , data = child_data) 
+
+child_data %>% 
+  count(mrace)
+
+
+summary(fit)
+summary(fit)$coef
+coef(fit)
+fitted.values(fit)
+
+fit %>% 
+  broom::glance()
+
+fit %>% 
+  broom::tidy() %>% 
+  select(term, estimate, p.value) %>% 
+  knitr::kable(digits = 3)
+
+modelr::add_residuals(child_data, fit)
+
+modelr::add_predictions(child_data, fit)
+
+
+```
+
+

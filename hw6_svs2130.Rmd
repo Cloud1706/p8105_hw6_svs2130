@@ -3,55 +3,109 @@ title: "Homework 6"
 author: "Harsha Senapathi"
 date: "11/21/2019"
 output: github_document
-editor_options: 
-  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
-library(expss)
-library(arsenal)
+library(modelr)
+library(mgcv)
+library(purrr)
+library(mlbench)
+library(ggplot2)
+library(broom)
+theme_set(theme_bw() + theme(legend.position = "bottom"))
 ```
 
-```{r}
+```{r p1_data_omport_tidying}
 child_data = read_csv("./data/birthweight.csv") %>% 
   janitor::clean_names() %>% 
   mutate(babysex = as.factor(babysex))%>% 
   mutate(frace = as.factor(frace))%>% 
   mutate(mrace = as.factor(mrace))%>% 
-  mutate(malform = as.factor(malform)) 
-
-tableby(mrace ~ bwt + bhead, data = child_data) %>% summary() %>% knitr::kable()
-# no missing data
-sapply(child_data, function(x) sum(is.na(x)))
-
-
-fit = lm(bwt ~ delwt + gaweeks + momage + ppwt + frace + mrace , data = child_data) 
-
-child_data %>% 
-  count(mrace)
-
-
-summary(fit)
-summary(fit)$coef
-coef(fit)
-fitted.values(fit)
-
-fit %>% 
-  broom::glance()
-
-fit %>% 
-  broom::tidy() %>% 
-  select(term, estimate, p.value) %>% 
-  knitr::kable(digits = 3)
-
-modelr::add_residuals(child_data, fit)
-
-modelr::add_predictions(child_data, fit)
-
-
+  mutate(malform = as.factor(malform)) %>% 
+  mutate(parity = as.factor(parity)) %>% 
+  select(-pnumlbw, -pnumsga) %>% 
+  select(bwt, babysex, everything())
 ```
+# Using backward elimiantion to look for preditors
+
+```{r p1_model_selection, message=FALSE}
+fit_mlr_child_bwt = lm(bwt ~ ., data = child_data)
+
+backward_elim_child_bwt_predictors =
+  step(fit_mlr_child_bwt, direction = "backward") %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+# stepwise regression using backward elimination
+
+new_fit_mlr_child_bwt = 
+  lm(bwt ~ parity + fincome + babysex + mheight + ppwt + gaweeks + smoken + delwt + mrace + blength + bhead, data = child_data)
+
+new_fit_mlr_child_bwt %>% 
+  broom::tidy()
+```
+
+```{r p1_model_prediction_vs_residuals}
+child_data %>% 
+  add_predictions(new_fit_mlr_child_bwt) %>% 
+  add_residuals(new_fit_mlr_child_bwt) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.4) +
+  labs(
+    title = "Residuals against fitted values for the new model",
+    x = "Fitted Values", 
+    y = "Residuals"
+  )
+```
+### Comparison of the above model with the following two models: 
+
+MLR_1 : One using length at birth and gestational age as predictors (main effects only)
+
+MLR_2 : One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
+
+In the following code chunk, cross validation is carried out followed by a plot to compare the spread of *root mean squares* in the three models.
+
+```{r p1_model_comparisons}
+set.seed(1)
+
+fit_mlr_1 = lm(bwt ~ blength + gaweeks, data = child_data)
+fit_mlr_2 = lm(bwt ~ bhead*blength*babysex, data = child_data) 
+# multiple regression with interaction
+
+cv_df = 
+  crossv_mc(child_data, n = 100) %>% 
+  mutate(train = map(train, as_tibble),
+         test = map(test, as_tibble)) 
+
+cv_df = cv_df %>% 
+  mutate(proposed_mlr  = map(train, ~lm(bwt ~ parity + fincome + babysex + mheight + ppwt + gaweeks + smoken + delwt + mrace + blength + bhead, data = child_data)),
+         mlr_1 = map(train, ~lm(bwt ~ blength + gaweeks, data = child_data)),
+         mlr_2 = map(train, ~lm(bwt ~ bhead*blength*babysex, data = child_data))
+  ) %>% 
+  mutate(rmse_proposed  = map2_dbl(proposed_mlr,  test, ~rmse(model = .x, data = .y)),
+         rmse_mlr_1 = map2_dbl(mlr_1, test, ~rmse(model = .x, data = .y)),
+         rmse_mlr_2 = map2_dbl(mlr_2, test, ~rmse(model = .x, data = .y))
+  )
+
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(), 
+    names_to = "model",
+    values_to = "rmse", 
+    names_prefix = "rmse_") %>%  
+  mutate(model =   fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin() + 
+  labs(
+    title = "Comparison of the proposed model with two alternative models",
+    x = "Models", 
+    y = "Root mean squares"
+  )
+```
+
+
+
 
 

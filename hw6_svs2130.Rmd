@@ -15,10 +15,14 @@ library(purrr)
 library(mlbench)
 library(ggplot2)
 library(broom)
+library(patchwork)
 theme_set(theme_bw() + theme(legend.position = "bottom"))
 ```
 
-```{r p1_data_omport_tidying}
+The child birth weight data is imported and cleaned as follows.
+
+```{r p1_data_omport_tidying, message=FALSE}
+
 child_data = read_csv("./data/birthweight.csv") %>% 
   janitor::clean_names() %>% 
   mutate(babysex = as.factor(babysex))%>% 
@@ -28,10 +32,15 @@ child_data = read_csv("./data/birthweight.csv") %>%
   mutate(parity = as.factor(parity)) %>% 
   select(-pnumlbw, -pnumsga) %>% 
   select(bwt, babysex, everything())
+
 ```
+
+In the above chunk, the babysex, father's race, mother's race, presence of malformations and parity are converted to factors. This is due to the categorical nature of the variable. Previous number of low birth weight babies and number of prior small for gestational age babies, i.e the *pnumlbw* and *pnumsga* columns respectively, are dropped since they are constant all through the data set and equal to 0.
+
+Here we propose a regression model for the birthweight using *stepwise regression* with *backward elimination*. This is a data driven model building-process where the predictors that lower the AIC (Akaike information criterion) the most from the starting AIC value are dropped sequentially after each run. 
 # Using backward elimiantion to look for preditors
 
-```{r p1_model_selection, message=FALSE}
+```{r p1_model_selection, results=FALSE}
 fit_mlr_child_bwt = lm(bwt ~ ., data = child_data)
 
 backward_elim_child_bwt_predictors =
@@ -39,13 +48,21 @@ backward_elim_child_bwt_predictors =
   broom::tidy() %>% 
   knitr::kable()
 # stepwise regression using backward elimination
+```
 
+The predictors finally chosen for our linear regression model are: 
+`r backward_elim_child_bwt_predictors %>% t() %>% knitr::kable()`
+
+Proposed regression model is:
+```{r p1_new_model}
 new_fit_mlr_child_bwt = 
   lm(bwt ~ parity + fincome + babysex + mheight + ppwt + gaweeks + smoken + delwt + mrace + blength + bhead, data = child_data)
 
 new_fit_mlr_child_bwt %>% 
   broom::tidy()
 ```
+
+Showing a plot of model residuals against fitted values using add_predictions and add_residuals.
 
 ```{r p1_model_prediction_vs_residuals}
 child_data %>% 
@@ -59,6 +76,7 @@ child_data %>%
     y = "Residuals"
   )
 ```
+
 ### Comparison of the above model with the following two models: 
 
 MLR_1 : One using length at birth and gestational age as predictors (main effects only)
@@ -105,7 +123,83 @@ cv_df %>%
   )
 ```
 
+The proposed model using backward elimination stepwise regression is the clear winner here with the highest prediction accuracy. We see that the first suggested alternative bwt ~ blengths + gaweeks has the largest RMSE while the other suggested model is lower but still larger than the proposed model.
 
+# Problem 2
+
+Importing data
+```{r p2_importing_data, message= FALSE}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+
+Creating values for 
+```{r p2_creating_results}
+results = weather_df %>% 
+  modelr::bootstrap(n = 5000) %>% 
+  mutate(
+    models = map(strap, ~ lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::tidy),
+    glance = map(models, broom::glance)) %>% 
+  select(results, glance, .id) %>% 
+  unnest(results) %>% 
+  pivot_wider( 
+    names_from = term,
+    values_from = c(estimate, std.error, glance),
+    id_cols = .id, 
+    ) %>%
+  janitor::clean_names() %>%
+  mutate(
+    log_b0_b1 = log(estimate_intercept * estimate_tmin)
+  ) %>%
+  unnest(c(glance_intercept))
+```
+
+
+```{r p2_95%CI_r.squared}
+results %>% 
+  pull(r.squared) %>% 
+  quantile(c(0.025, 0.975)) %>% 
+  knitr::kable(col.names = "R.squared")
+```
+
+The above table shows the 95% CI for R-squared
+
+```{r p2_95%CI_coefficient}
+results %>% 
+  pull(log_b0_b1) %>% 
+  quantile(c(0.025, 0.975)) %>% 
+  knitr::kable(col.names = "Coeffcient")
+```
+
+The above table shows the 95% CI for log_b0_b1
+
+```{r p2_plots, message=FALSE}
+r.squared = results %>% 
+  ggplot(aes(x = r.squared)) + 
+  geom_histogram() + 
+  geom_density() +
+  theme_minimal() 
+log_b0_b1 = results %>% 
+  ggplot(aes(x = log_b0_b1)) + 
+  geom_histogram() + 
+  geom_density() +
+  theme_minimal()
+r.squared + log_b0_b1
+
+```
+
+We can observe the histograms plotted above for Variance and log of intercept are normally distributed. The mean of r-squared is `r results %>% pull(r.squared) %>% mean` and mean for log_b0_b1 is `r results %>% pull(log_b0_b1) %>% mean`.
 
 
 
